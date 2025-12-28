@@ -6,7 +6,7 @@ from prompt import vehicle_prompt
 conversation_memory = []
 
 # States
-chat_state = "NEW"  # NEW | DIY_INSPECT | DIY_FIX | DIY_VERIFY | DIY_CONTINUE | ASK_LOCATION
+chat_state = "NEW"   # NEW | DIY_INSPECT | DIY_FIX | DIY_VERIFY | DIY_CONTINUE | ASK_LOCATION
 current_steps = []
 step_index = 0
 current_step = None
@@ -41,17 +41,23 @@ def is_closing_intent(text):
     ])
 
 
+def is_new_issue(text):
+    keywords = [
+        "noise", "overheat", "brake", "window", "engine",
+        "smell", "vibration", "leak", "not working", "problem"
+    ]
+    return any(k in text.lower() for k in keywords)
+
+
 def problem_found(text):
-    text = text.lower()
-    return any(p in text for p in [
+    return any(p in text.lower() for p in [
         "there is", "found", "low", "leak", "block",
         "damage", "damaged", "worn", "faulty", "not working"
     ])
 
 
 def fix_attempted(text):
-    text = text.lower()
-    return any(p in text for p in [
+    return any(p in text.lower() for p in [
         "done", "fixed", "removed", "cleaned",
         "tightened", "replaced", "adjusted",
         "it worked", "working now", "resolved",
@@ -64,14 +70,14 @@ def generate_fix_guidance():
         "That confirms a likely cause of the issue. "
         "If it’s safe and simple, you can try fixing it using commonly available tools "
         "like a screwdriver, wrench, cleaning cloth, or lubricant spray. "
-        "If you’re not comfortable proceeding or special tools are required, it’s best to stop and let me know."
+        "If special tools are required or you’re unsure, it’s best to stop and let me know."
     )
 
 
 # ---------- Workshop Logic ----------
 
 def find_workshops(location):
-    mock_workshops = {
+    mock = {
         "kochi": [
             "ABC Auto Service – MG Road",
             "QuickFix Motors – Kaloor",
@@ -79,24 +85,21 @@ def find_workshops(location):
         ],
         "bangalore": [
             "FixIt Auto Hub – Indiranagar",
-            "ProDrive Garage – Whitefield",
-            "Metro Car Care – Yelahanka"
+            "ProDrive Garage – Whitefield"
         ],
         "chennai": [
             "Speed Motors – Anna Nagar",
-            "Elite Auto Care – Velachery",
-            "Prime Garage – T Nagar"
+            "Elite Auto Care – Velachery"
         ]
     }
-
-    return mock_workshops.get(location.lower(), [
+    return mock.get(location.lower(), [
         "Authorized Service Center",
         "Nearest trusted multi-brand workshop"
     ])
 
 
 def show_workshop(reason):
-    global issue_closed, chat_state
+    global chat_state, issue_closed
 
     print("\nAI Assistant:")
     print(reason)
@@ -106,9 +109,8 @@ def show_workshop(reason):
         chat_state = "ASK_LOCATION"
         return
 
-    workshops = find_workshops(user_location)
     print(f"\nHere are some workshops near {user_location}:")
-    for w in workshops:
+    for w in find_workshops(user_location):
         print(f"- {w}")
 
     issue_closed = True
@@ -119,10 +121,9 @@ def show_workshop(reason):
 
 def start_diy(steps):
     global chat_state, current_steps, step_index, current_step
-
     current_steps = steps
     step_index = 0
-    current_step = current_steps[step_index]
+    current_step = current_steps[0]
     chat_state = "DIY_INSPECT"
 
     print("\nAI Assistant:")
@@ -136,29 +137,37 @@ print("Vehicle AI Help Chatbot")
 print("Type 'exit' anytime to quit.\n")
 
 while True:
-    user_input = input("You: ").strip().lower()
+    user_input = input("You: ").strip()
 
-    if user_input == "exit":
+    if user_input.lower() == "exit":
         print("\nAI Assistant: Drive safe. I’m here if you need help again.")
         break
 
-    # ---------- Handle Location ----------
+    # Detect new issue at ANY time
+    if chat_state != "NEW" and is_new_issue(user_input):
+        chat_state = "NEW"
+        current_steps = []
+        step_index = 0
+        current_step = None
+
+    # ---------- ASK LOCATION ----------
     if chat_state == "ASK_LOCATION":
+        if is_new_issue(user_input):
+            print("\nAI Assistant: Got it — let’s look at that issue first.")
+            chat_state = "NEW"
+            continue
+
         user_location = user_input
         print("\nAI Assistant:")
-        print(f"Thanks! I’ll look for workshops near {user_location}.")
-
-        workshops = find_workshops(user_location)
-        print("\nRecommended workshops:")
-        for w in workshops:
+        print(f"Thanks! Here are some workshops near {user_location}:")
+        for w in find_workshops(user_location):
             print(f"- {w}")
 
-        print("\nIf you need help with anything else, feel free to ask.")
         issue_closed = True
         chat_state = "NEW"
         continue
 
-    # ---------- Polite Closing ----------
+    # ---------- Polite closing ----------
     if issue_closed and is_closing_intent(user_input):
         print("\nAI Assistant: You’re welcome 😊 If you have another vehicle issue, feel free to ask.")
         issue_closed = False
@@ -190,7 +199,7 @@ while True:
             print("\nAI Assistant:")
             print("Does the issue seem resolved now?")
         elif is_closing_intent(user_input):
-            show_workshop("Understood. If the issue persists, a professional inspection is recommended.")
+            show_workshop("Understood. If the issue persists, professional inspection is recommended.")
         else:
             print("\nAI Assistant:")
             print("Take your time. Let me know once you’ve tried what’s possible.")
@@ -198,7 +207,7 @@ while True:
 
     # ---------- DIY VERIFY ----------
     if chat_state == "DIY_VERIFY":
-        if user_input in ["yes", "y"]:
+        if user_input.lower() in ["yes", "y"]:
             print("\nAI Assistant: Glad to hear that 😊 Drive safe!")
             chat_state = "NEW"
         else:
@@ -212,7 +221,7 @@ while True:
 
     # ---------- DIY CONTINUE ----------
     if chat_state == "DIY_CONTINUE":
-        if user_input in ["yes", "y"]:
+        if user_input.lower() in ["yes", "y"]:
             chat_state = "NEW"
         else:
             show_workshop("Understood. A professional inspection would be the safest option now.")
@@ -221,7 +230,7 @@ while True:
     # ---------- NEW ISSUE ----------
     data = ask_llm(user_input)
     if not data or not all(k in data for k in ["diagnosis", "severity", "action"]):
-        print("\nAI Assistant: I’m not fully sure yet. Could you describe the issue in a bit more detail?")
+        print("\nAI Assistant: I’m not fully sure yet. Could you describe the issue a bit more?")
         continue
 
     conversation_memory.append(f"User: {user_input}")
@@ -231,7 +240,7 @@ while True:
     print(data.get("explanation", data["diagnosis"]))
 
     if data["action"] == "DIY" and data.get("steps"):
-        structured_steps = [{"inspect": step} for step in data["steps"]]
-        start_diy(structured_steps)
+        structured = [{"inspect": step} for step in data["steps"]]
+        start_diy(structured)
     else:
         show_workshop(data.get("explanation", "This issue is best handled by a professional."))
